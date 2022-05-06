@@ -1,0 +1,222 @@
+function [tr,bj,bm,n] = DEBA(VTR,XVmin,XVmax,D,NP,fname)
+% aa     当前计算到第几次
+% VTR    优化的目标值
+% fname  选择测试函数
+% XVmin  搜索空间下限
+% XVmax  搜索空间上限
+% Default parameters
+if nargin<1,  para=[20 1000 0.5 0.5];  end
+n=para(1);      % Population size, typically 10 to 40
+N_gen=para(2);  % Number of generations
+A=para(3);      % Loudness  (constant or decreasing)
+r=para(4);      % Pulse rate (constant or decreasing)
+% This frequency range determines the scalings
+% You should change these values if necessary
+Qmin=0;         % Frequency minimum
+Qmax=2;         % Frequency maximum
+% Iteration parameters
+N_iter=0;       % Total number of function evaluations
+% Dimension of the search variables
+d=10;           % Number of dimensions 
+% Lower limit/bounds/ a vector
+Lb=-2*ones(1,d);
+% Upper limit/bounds/ a vector
+Ub=2*ones(1,d);
+% Initializing arrays
+Q=zeros(n,1);   % Frequency
+v=zeros(n,d);   % Velocities
+% Initialize the population/solutions
+for i=1:n,
+  Sol(i,:)=Lb+(Ub-Lb).*rand(1,d);
+  Fitness(i)=Fun(Sol(i,:));
+end
+% Find the initial best solution
+[fmin,I]=min(Fitness);
+best=Sol(I,:);
+
+% Start the iterations -- Bat Algorithm (essential part)  %
+for t=1:N_gen, 
+% Loop over all bats/solutions
+        for i=1:n,
+          Q(i)=Qmin+(Qmin-Qmax)*rand;
+          v(i,:)=v(i,:)+(Sol(i,:)-best)*Q(i);
+          S(i,:)=Sol(i,:)+v(i,:);
+          % Apply simple bounds/limits
+          Sol(i,:)=simplebounds(Sol(i,:),Lb,Ub);
+          % Pulse rate
+          if rand>r
+          % The factor 0.001 limits the step sizes of random walks 
+              S(i,:)=best+0.001*randn(1,d);
+          end
+     % Evaluate new solutions
+           Fnew=Fun(S(i,:));
+     % Update if the solution improves, or not too loud
+           if (Fnew<=Fitness(i)) && (rand<A) ,
+                Sol(i,:)=S(i,:);
+                Fitness(i)=Fnew;
+           end
+
+          % Update the current best solution
+          if Fnew<=fmin,
+                best=S(i,:);
+                fmin=Fnew;
+          end
+        end
+        N_iter=N_iter+n;
+end
+
+itermax = 8000;            % maximum number of iterations (generations)
+F = 0.6;                  % DE-stepsize F from interval [0, 2]
+F1=0.45;
+CR = 0.9;                 % crossover probability constant from interval [0, 1]
+NP=10;
+D=2;
+XVmin=10;
+XVmax=20;
+%-----DE Initialize--------------------------------------------------------
+pop = zeros(NP,D);        % initialize pop
+for i = 1:NP
+   pop(i,:) = XVmin + rand(1,D).*(XVmax - XVmin);
+end
+popold = zeros(size(pop));% toggle population
+val = zeros(1,NP);        % create and reset the "cost array"
+bestmem = zeros(1,D);     % best population member ever
+bestmemit = zeros(1,D);   % best population member in iteration
+for i = 1:NP              % Evaluate the best member after initialization
+    input = pop(i,:);
+    output(i) = feval(fname,input);
+end
+val = output;
+[bestvalit,idx] = min(val);
+bestmemit = pop(idx,:);   % best member of current iteration
+bestmem = bestmemit;      % best member ever
+bestval = bestvalit;      % best value ever
+%-----DE Iteration---------------------------------------------------------
+tr = zeros(1,itermax);
+for j = 1:itermax
+    if (bestval-VTR) < 1e-5
+        break
+    end   
+    popold = pop;
+    % generate the trail population
+    for i = 1:NP
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        CR=0.1;
+        if val(i)<=mean(val)
+           CR=0.1+(0.6-0.1)*(val(i)-max(val))/(min(val)-max(val)); 
+        end     
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        % pick up the donor and differential vectors
+        rd = fix(rand(1) * NP + 1);
+        while val(rd) > val(i)
+            rd = fix(rand(1) * NP + 1);
+        end
+        rb = fix(rand(1) * NP + 1);
+        while rb == i || rb == rd
+             rb = fix(rand(1) * NP + 1);
+        end
+        rc = fix(rand(1) * NP + 1);
+        while rc == i || rc == rd || rc==rb
+             rc = fix(rand(1) * NP + 1);
+        end
+        re = fix(rand(1) * NP + 1);
+        while re == i || re == rd || re==rb  || re==rc
+             re = fix(rand(1) * NP + 1);
+        end
+        % bulid a trial vector and crossover
+        jr = fix(rand(1) * D + 1);
+
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        % 找基变量
+        tb=rd;
+        if val(rb,:)<=min(val(rd,:),val(rc,:))
+           tb=rb;
+        end
+        if val(rc,:)<=min(val(rd,:),val(rb,:))
+           tb=rc;
+        end
+        % 找另两个差分向量;
+        tm=rd;
+        if val(rb,:)>=min(val(rd,:),val(rc,:)) && val(rb,:)<=max(val(rd,:),val(rc,:))
+           tm=rb;
+        end
+        if val(rc,:)>=min(val(rd,:),val(rb,:)) && val(rc,:)<=max(val(rd,:),val(rb,:))
+            tm=rc;
+        end
+        % 找最差的向量
+        tw=rd;
+        if val(rb,:)>=max(val(rd,:),val(rc,:))
+           tw=rb;
+        end
+        if val(rc,:)>=max(val(rd,:),val(rb,:))
+           tw=rc;
+        end
+        % 自适应缩放因子
+        F=0.1+0.8*(val(tm)-val(tb))/(val(tw)-val(tb));
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+        for k = 1:D
+            if rand(1)<=CR || k==jr
+               diff = F * (popold(tm,k) - popold(tw,k));
+               pop(i,k) = popold(tb,k) + diff;                
+            else
+                pop(i,k) = popold(i,k);
+            end
+        end
+        for k = 1:D
+           if pop(i,k) > XVmax(k)
+               pop(i,k) = XVmax(k);
+           end
+           if pop(i,k) < XVmin(k)
+               pop(i,k) = XVmin(k);
+           end
+        end
+    end
+    % select trial vector
+    for i = 1:NP
+        input = pop(i,:);
+        output = feval(fname,input);
+        if output < val(i)
+            val(i) = output;
+        else
+            pop(i,:) = popold(i,:);
+        end
+    end
+    % find the best parameter vector and the best objective function
+    [bestvalit,idx] = min(val);
+    bestmemit = pop(idx,:); 
+    if bestvalit < bestval
+        bestval = bestvalit;
+        bestmem = bestmemit;
+    end
+    tr(j) = bestval;
+    if abs(tr(j)) < VTR
+        break
+    end   
+    bestval
+    tr(j)=bestval;
+end
+% Output/display
+disp(['Number of evaluations: ',num2str(N_iter)]);
+disp(['Best =',num2str(best),' fmin=',num2str(fmin)]);
+
+% Application of simple limits/bounds
+function s=simplebounds(s,Lb,Ub)
+  % Apply the lower bound vector
+  ns_tmp=s;
+  I=ns_tmp<Lb;
+  ns_tmp(I)=Lb(I);
+  
+  % Apply the upper bound vector 
+  J=ns_tmp>Ub;
+  ns_tmp(J)=Ub(J);
+  % Update this new move 
+  s=ns_tmp;
+  
+bj=bestval;
+bm=bestmem;
+n=j;
+
+    
